@@ -57,15 +57,15 @@ Inspect includes some simple built in metrics for calculating accuracy, mean, et
 
 -   `ci()`
 
-    Confidence interval for the mean, reported as a mapping with `lower` and `upper` bounds. Defaults to a 95% Student-t interval (`mean ± t · stderr`, with `n - 1` degrees of freedom, or `clusters - 1` when `cluster=` is set); pass `level=` to change the confidence level or `method="bootstrap"` for a percentile (cluster) bootstrap interval. Useful for deciding, for example, whether two models' accuracy intervals overlap. For binary scores, prefer `ci_wilson()`.
+    Confidence interval for the mean, reported as a mapping with `lower` and `upper` bounds. Defaults to a 95% Student-t interval (`mean ± t · stderr`, with `n - 1` degrees of freedom, or `clusters - 1` when `cluster=` is set); pass `level=` to change the confidence level or `method="bootstrap"` for a percentile (cluster) bootstrap interval. Useful for deciding, for example, whether two models' accuracy intervals overlap. On a run with no scored samples both bounds are `NaN` rather than `0.0`. For binary scores, prefer `ci_wilson()`.
 
 -   `ci_wilson()`
 
-    Wilson score confidence interval for the mean of binary (0/1) scores, treating it as a binomial proportion. Prefer this over `ci()` for binary scores such as accuracy: the bounds always stay within [0, 1] and remain well calibrated for small samples and proportions near 0 or 1. Pass `level=` to change the confidence level; with `cluster=` the interval uses an effective sample size derived from the clustered standard error.
+    Wilson score confidence interval for the mean of binary (0/1) scores, treating it as a binomial proportion. Prefer this over `ci()` for binary scores such as accuracy: a computed interval always stays within [0, 1] and remains well calibrated for small samples and proportions near 0 or 1 (with no scored samples both bounds are `NaN`). Pass `level=` to change the confidence level; with `cluster=` the interval uses an effective sample size derived from the clustered standard error.
 
 -   `frequency()`
 
-    Frequency of each distinct categorical score value. By default this reports proportions over scored observations; pass `normalize=False` to report counts. If a task uses epochs, `frequency()` receives unreduced epoch scores, so each scored sample epoch is an observation.
+    Frequency of each distinct categorical score value. By default this reports proportions over scored observations; pass `normalize=False` to report counts. On a run with no scored samples a proportion is undefined, so each declared category is reported as `NaN`; counts stay `0`. If a task uses epochs, `frequency()` receives unreduced epoch scores, so each scored sample epoch is an observation.
 
 -   `categorical()`
 

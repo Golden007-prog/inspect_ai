@@ -550,3 +550,38 @@ def test_score_repeated_append_same_scorer_recompute_round_trip() -> None:
     assert [s.name for s in reloaded.results.scores] == ["match", "match1", "match2"]
     assert all(s.scored_samples == 8 for s in reloaded.results.scores)
     assert _metrics_snapshot(reloaded) == before
+
+
+def test_frequency_empty_scores_reports_declared_categories_as_nan() -> None:
+    # #5150: with no scored samples the declared categories keep the metric's
+    # shape but carry NaN (no data), never a fabricated 0.0 that reads as a
+    # measured absence.
+    import math
+
+    result = call(frequency(categories=["yes", "no"]), [])
+    assert list(result.keys()) == ["yes", "no"]
+    assert all(math.isnan(v) for v in result.values())
+
+    # counts are well defined at zero observations and stay 0 — only the
+    # proportion is undefined
+    counts = call(frequency(categories=["yes"], normalize=False), [])
+    assert counts == {"yes": 0.0}
+
+    # categories as a StrEnum is the form categorical() produces and the
+    # docstring advertises; it resolves to the same key list
+    from_enum = call(frequency(categories=Verdict), [])
+    assert list(from_enum.keys()) == ["yes", "no", "unsure"]
+    assert all(math.isnan(v) for v in from_enum.values())
+
+    # with no declared categories there is no shape to report; the empty
+    # mapping falls back to the flat NaN row upstream. This holds for counts
+    # too -- normalize=False has no categories to report 0 for.
+    assert call(frequency(), []) == {}
+    assert call(frequency(normalize=False), []) == {}
+
+
+def test_frequency_unobserved_declared_category_still_zero() -> None:
+    # a scored run is unchanged: a declared category nobody hit is a measured
+    # zero, not NaN
+    result = call(frequency(categories=["yes", "no"]), [ss("yes")])
+    assert result == {"yes": 1.0, "no": 0.0}

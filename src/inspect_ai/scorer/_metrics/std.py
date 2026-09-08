@@ -209,7 +209,9 @@ def ci(
           accounts for within-cluster correlation.
 
     Returns:
-       ci metric returning a mapping `{"lower": ..., "upper": ...}`.
+       ci metric returning a mapping `{"lower": ..., "upper": ...}`. On a run
+       with no scored samples both bounds are `NaN`: there is no interval to
+       report, and a `[0.0, 0.0]` interval would read as a measurement.
     """
     if not 0.0 < level < 1.0:
         raise ValueError(f"ci `level` must be in the open interval (0, 1), got {level}")
@@ -227,16 +229,29 @@ def ci(
         # misconfigured cluster key fails loudly even on singleton inputs
         # (mirroring stderr's behavior); the partition is the single source
         # of truth for cluster identity across the SE, the degrees of
-        # freedom, and the cluster bootstrap.
+        # freedom, and the cluster bootstrap. On an empty score list there is
+        # nothing to validate against, so a bad key is not caught here — a
+        # pre-existing divergence from ci_wilson, which rejects fewer than two
+        # clusters before it reaches its own empty guard.
         partition = (
             _cluster_partition(scores, cluster, values, "ci")
             if cluster is not None
             else None
         )
 
-        if len(values) < 2:
-            # interval is undefined for < 2 observations; collapse to the point
-            point = float(values[0]) if values else 0.0
+        if len(values) == 0:
+            # no scored samples: report the same keys with NaN values rather
+            # than a 0.0 that reads as a measured interval
+            return {"lower": float("nan"), "upper": float("nan")}
+
+        if len(values) == 1:
+            # n=1 is left exactly as it was before the empty case was split
+            # out of this branch: the interval collapses to the observed point.
+            # That is not a defensible interval for method="t" (df=0), and
+            # ci_wilson is genuinely defined here where this is not — but
+            # changing it is a separate question from reporting no data at all,
+            # so this path is untouched. See the discussion on the issue.
+            point = float(values[0])
             return {"lower": point, "upper": point}
 
         if method == "t":
@@ -268,10 +283,11 @@ def ci_wilson(
 
     Treats the mean score as a binomial proportion and reports the two-sided
     `level` Wilson score interval as a mapping with `lower` and `upper`
-    bounds. Unlike the t interval from `ci()`, the bounds are always within
-    [0, 1] and remain well calibrated for small samples and for proportions
-    near 0 or 1 — prefer this metric over `ci()` for binary scores such as
-    accuracy.
+    bounds. Unlike the t interval from `ci()`, a computed interval always lies
+    within [0, 1] and remains well calibrated for small samples and for
+    proportions near 0 or 1 — prefer this metric over `ci()` for binary scores
+    such as accuracy. With no scored samples there is no proportion to bound
+    and both keys are `NaN` rather than a number in that range.
 
     Score values must lie in [0, 1]: values outside that range raise a
     `ValueError` (there is no binomial reading of such data). Non-binary
@@ -303,7 +319,9 @@ def ci_wilson(
           Franco et al. (https://pmc.ncbi.nlm.nih.gov/articles/PMC6690503/).
 
     Returns:
-       ci_wilson metric returning a mapping `{"lower": ..., "upper": ...}`.
+       ci_wilson metric returning a mapping `{"lower": ..., "upper": ...}`. On
+       a run with no scored samples both bounds are `NaN` rather than a
+       proportion in [0, 1].
     """
     from statistics import NormalDist
 
@@ -349,7 +367,10 @@ def ci_wilson(
             )
 
         if len(values) == 0:
-            return {"lower": 0.0, "upper": 0.0}
+            # no scored samples: report the same keys with NaN values rather
+            # than a 0.0 that reads as a measured interval. A configured
+            # cluster key still raises above, before this point.
+            return {"lower": float("nan"), "upper": float("nan")}
 
         n = float(len(values))
         p_hat = sum(values) / n

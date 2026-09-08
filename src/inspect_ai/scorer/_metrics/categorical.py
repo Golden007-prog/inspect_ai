@@ -42,7 +42,17 @@ def _frequencies(
     counts: Counter[str] = Counter(str(v) for v in values)
     keys = list(dict.fromkeys((*(categories or ()), *counts)))
     total = sum(counts.values())
-    denom = float(total) if (normalize and total > 0) else 1.0
+
+    if total == 0 and normalize:
+        # no scored samples: a proportion is undefined, so report the declared
+        # categories with NaN rather than a 0.0 that reads as a measured
+        # absence. Counts (normalize=False) take the branch below and stay 0 —
+        # a count over zero observations is zero, not unknown. Either way, with
+        # no declared categories there is no shape to report and the empty
+        # mapping is returned, which results.py turns into a flat NaN row.
+        return {k: float("nan") for k in keys}
+
+    denom = float(total) if normalize else 1.0
     return {k: counts.get(k, 0) / denom for k in keys}
 
 
@@ -84,9 +94,12 @@ def frequency(
     Args:
        categories: The full set of possible categories, as a ``StrEnum`` type
           or a sequence of labels. Declare this so that categories with zero
-          observations are still reported as ``0.0`` and the metric round-trips
-          identically through ``recompute_metrics()``. If ``None``, only
-          observed categories are reported.
+          observations are still reported (``0.0``, or a ``0`` count when
+          ``normalize=False``) and the metric round-trips identically through
+          ``recompute_metrics()``. On a run with no scored samples a proportion
+          is undefined, so the declared categories are reported as ``NaN``;
+          counts are still ``0``. If ``None``, only observed categories are
+          reported.
        normalize: If ``True`` (default) report proportions in ``[0, 1]``;
           if ``False`` report raw counts.
 

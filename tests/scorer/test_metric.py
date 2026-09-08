@@ -1121,9 +1121,14 @@ def test_aggregate_invalid_on_missing_raises():
 
 
 def test_metrics_return_zero_for_empty_scores() -> None:
-    # Every built-in numeric metric must handle an empty score list by
-    # returning 0.0 rather than nan (with numpy empty-slice warnings). See the
-    # empty-input guards documented in accuracy()/std()/var().
+    # The metrics below guard an empty score list by returning 0.0 rather than
+    # nan (with numpy empty-slice warnings); see the guards documented in
+    # accuracy()/std()/var(). This is not a package-wide convention: other
+    # scalar metrics return NaN on empty input (krippendorff_alpha(),
+    # perplexity_per_token(), perplexity_per_seq()), and for scalar metrics the
+    # distinction never reaches the log because results substitutes NaN for any
+    # non-Mapping return (empty_metric_value). It matters only for metrics that
+    # return a shape, which is reported as-is: grouped(), ci(), frequency().
     from inspect_ai.scorer import (
         accuracy,
         bootstrap_stderr,
@@ -1272,7 +1277,9 @@ def test_ci_invalid_level_raises():
 
 def test_ci_small_sample_collapses_to_point():
     assert ci()([SampleScore(score=Score(value=3.0))]) == {"lower": 3.0, "upper": 3.0}
-    assert ci()([]) == {"lower": 0.0, "upper": 0.0}
+    # a single observation is a known point; zero observations are not (#5150)
+    empty = cast(dict[str, float], ci()([]))
+    assert math.isnan(empty["lower"]) and math.isnan(empty["upper"])
 
 
 def test_ci_bootstrap_brackets_mean():
@@ -1491,12 +1498,41 @@ def test_ci_wilson_tolerates_graded_values():
 
 
 def test_ci_wilson_empty_and_singleton():
-    assert ci_wilson()([]) == {"lower": 0.0, "upper": 0.0}
+    # #5150: no scored samples reports the shape with NaN (no data), never a
+    # fabricated 0.0 that reads as a measured interval.
+    empty = cast(dict[str, float], ci_wilson()([]))
+    assert list(empty.keys()) == ["lower", "upper"]
+    assert math.isnan(empty["lower"]) and math.isnan(empty["upper"])
     # unlike t/bootstrap, Wilson is well-defined at n=1: reference from
     # scipy binomtest(1, 1).proportion_ci(0.95, "wilson")
     interval = ci_wilson()(binary_scores(1, 1))
     assert interval["lower"] == pytest.approx(0.20654931437723745, rel=1e-9)
     assert interval["upper"] == pytest.approx(1.0)
+
+
+def test_ci_empty_scores_returns_nan_shape():
+    # #5150: the interval keys survive an all-unscored run, carrying NaN
+    # rather than a fabricated 0.0 point estimate.
+    for method in ("t", "bootstrap"):
+        empty = cast(dict[str, float], ci(method=method)([]))
+        assert list(empty.keys()) == ["lower", "upper"]
+        assert math.isnan(empty["lower"]) and math.isnan(empty["upper"])
+
+    # a single observation still collapses to that observation, unchanged
+    singleton = cast(dict[str, float], ci()([SampleScore(score=Score(value=1.0))]))
+    assert singleton == {"lower": 1.0, "upper": 1.0}
+
+    # a configured cluster key keeps the NaN shape, because there is nothing
+    # for _cluster_partition to reject on an empty score list. ci_wilson
+    # reaches its explicit "at least two clusters" raise first and so rejects
+    # the same input. Both behaviours predate this change (ci() previously
+    # returned {0.0, 0.0} here) and pinning them is only to record the
+    # divergence, not to endorse it -- see the issue.
+    clustered = cast(dict[str, float], ci(cluster="c")([]))
+    assert list(clustered.keys()) == ["lower", "upper"]
+    assert math.isnan(clustered["lower"]) and math.isnan(clustered["upper"])
+    with pytest.raises(ValueError, match="at least two clusters"):
+        ci_wilson(cluster="c")([])
 
 
 def test_ci_wilson_extreme_level_does_not_round_to_one():
